@@ -103,29 +103,6 @@ while running:
     # 배경 그리기 (스크롤)
     screen.blit(bg_img, (scroll_x, 0))
 
-    interaction_message = ""
-    message_timer = 0  # 시간 측정
-
-    # --- main loop 안에서 키 처리 이후에 추가 ---
-    near_object = None
-    for obj in obstacle_list:
-        if detective_world_rect.colliderect(obj["rect"]):
-            near_object = obj
-
-    if keys[pygame.K_e]:
-        if near_object :
-            interaction_message = f"{near_object['name']}과(와) 상호작용했습니다."
-            message_timer = pygame.time.get_ticks()
-
-    # --- 메시지 출력 부분 (화면 위쪽에 2초간 표시) ---
-    if interaction_message and pygame.time.get_ticks() - message_timer < 2000:
-        font = pygame.font.SysFont("Arial", 32)
-        text = font.render(interaction_message, True, (0, 0, 0))
-        screen.blit(text, (screen_width // 2 - text.get_width() // 2, 50))
-    elif pygame.time.get_ticks() - message_timer >= 2000:
-        interaction_message = ""
-
-
     # 추가: 배경을 반복하고 싶다면 두 배경 이어 붙이기
     screen.blit(bg_img, (scroll_x + bg_img.get_width(), 0))
     screen.blit(bg_img, (scroll_x - bg_img.get_width(), 0))
