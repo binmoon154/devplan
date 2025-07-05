@@ -101,11 +101,11 @@ while running:
             current_img = back_idle_img
 
     # 배경 그리기 (스크롤)
-    screen.blit(bg_img, (scroll_x, 0))
+    #screen.blit(bg_img, (scroll_x, 0))
 
     # 추가: 배경을 반복하고 싶다면 두 배경 이어 붙이기
-    screen.blit(bg_img, (scroll_x + bg_img.get_width(), 0))
-    screen.blit(bg_img, (scroll_x - bg_img.get_width(), 0))
+    #screen.blit(bg_img, (scroll_x + bg_img.get_width(), 0))
+    #screen.blit(bg_img, (scroll_x - bg_img.get_width(), 0))
 
     # 캐릭터 그리기
     screen.blit(current_img, (detective_x, detective_y))
