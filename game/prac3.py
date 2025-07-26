@@ -3,7 +3,7 @@ import sys
 import os
 
 pygame.init()
-screen = pygame.display.set_mode((800, 600))
+screen = pygame.display.set_mode((1440, 1000))
 pygame.display.set_caption("문 상호작용")
 clock = pygame.time.Clock()
 
@@ -35,69 +35,64 @@ BLACK = (0, 0, 0)
 font_path = './zzz/NanumGothic.ttf'  # 파일 경로
 font = pygame.font.SysFont(None, 36)
 
+camera_offset = 0
+
 # --- Player 클래스 ---
 class Player:
     def __init__(self, x, y):
         self.rect = pygame.Rect(x, y, 50, 50)
         self.speed = 5
-        self.image = idle_img     # 기본 이미지는 idle
-        self.direction = "right"  # 방향 기억 (오른쪽/왼쪽)
-        self.is_running = False   # Shift 누르고 있나?
-        self.is_moving = False    # 이동 중인지?
+        self.image = idle_img
+        self.direction = "right"
+        self.is_running = False
+        self.is_moving = False
 
     def move(self):
+        global camera_offset  # offset을 전역 변수로 접근
         keys = pygame.key.get_pressed()
         self.is_moving = False
         self.is_running = False
 
-        # ← 방향 이동
         if keys[pygame.K_a] or keys[pygame.K_LEFT]:
             self.direction = "left"
             self.is_moving = True
             if keys[pygame.K_LSHIFT]:
-                self.rect.x -= self.speed * 1.4
+                camera_offset -= self.speed * 1.4
                 self.is_running = True
             else:
-                self.rect.x -= self.speed
+                camera_offset -= self.speed
 
-        # → 방향 이동
         elif keys[pygame.K_d] or keys[pygame.K_RIGHT]:
             self.direction = "right"
             self.is_moving = True
             if keys[pygame.K_LSHIFT]:
-                self.rect.x += self.speed * 1.4
+                camera_offset += self.speed * 1.4
                 self.is_running = True
             else:
-                self.rect.x += self.speed
+                camera_offset += self.speed
 
-        # 이동 상태에 따라 이미지 선택
+        # 이미지 설정은 그대로
         if self.is_moving:
             if self.is_running:
-                if self.direction == "right":
-                    self.image = run_right_img
-                else:
-                    self.image = run_left_img
+                self.image = run_right_img if self.direction == "right" else run_left_img
             else:
-                if self.direction == "right":
-                    self.image = walk_right_img
-                else:
-                    self.image = walk_left_img
+                self.image = walk_right_img if self.direction == "right" else walk_left_img
         else:
-            if self.direction == "right":
-                self.image = idle_img
-            else:
-                self.image = back_idle_img
+            self.image = idle_img if self.direction == "right" else back_idle_img
 
     def draw(self, screen):
+        # 항상 중앙에 그리기
         screen.blit(self.image, self.rect)
+
 
 # --- Door 클래스 ---
 class Door:
-    def __init__(self, x, y):
+    def __init__(self, x, y, move_distance):
         self.closed_rect = pygame.Rect(x, y, 150, 240)
         self.opened = False
-        self.open_time = 0         # 문이 열린 시각 (ms)
-        self.cooldown = 2000       # 문이 열린 상태 유지 시간 (2초)
+        self.open_time = 0
+        self.cooldown = 2000
+        self.move_distance = move_distance  # 문마다 이동 거리 다르게 설정
 
     def open(self):
         self.opened = True
@@ -107,17 +102,23 @@ class Door:
         if self.opened:
             current_time = pygame.time.get_ticks()
             if current_time - self.open_time > self.cooldown:
-                self.opened = False  # 시간 지나면 다시 닫힘
+                self.opened = False
 
-    def draw(self, screen):
-        if self.opened:
-            pygame.draw.rect(screen, GRAY, self.closed_rect)
-        else:
-            pygame.draw.rect(screen, BROWN, self.closed_rect)
+    def draw(self, screen, offset_x):
+        draw_rect = self.closed_rect.move(-offset_x, 0)
+        color = GRAY if self.opened else BROWN
+        pygame.draw.rect(screen, color, draw_rect)
+
 
 # 객체 생성
-player = Player(100, 300)
-door = Door(600, 260)
+player = Player(1440 // 2 - 25, 300)
+# 여러 개의 문 만들기
+doors = [
+    Door(600, 260, 100),    # 첫 번째 문은 100 이동
+    Door(1000, 260, 200),   # 두 번째 문은 200 이동
+    Door(1400, 260, 300),   # 세 번째 문은 300 이동
+]
+
 
 # --- 게임 루프 ---
 running = True
@@ -129,22 +130,25 @@ while running:
             running = False
 
     player.move()
-
     # 문 상태 업데이트
-    door.update()
+    for door in doors:
+        door.update()
 
-    near_door = player.rect.colliderect(door.closed_rect)
-
-    # 문 열기
+    # 문과의 충돌 검사 및 열기
     keys = pygame.key.get_pressed()
-    if near_door and keys[pygame.K_e] and not door.opened:
-        door.open()
-        player.rect.x -= 50  # 플레이어 왼쪽으로 이동
+    # 문 위치를 카메라 기준으로 보정해서 충돌 검사
+    for door in doors:
+        door_rect_with_offset = door.closed_rect.move(-camera_offset, 0)
+        near_door = player.rect.colliderect(door_rect_with_offset)
+
+        if near_door and keys[pygame.K_e] and not door.opened:
+            door.open()
+            camera_offset -= 50   # 화면을 이동시켜 플레이어가 이동한 것처럼 보임
 
 # 그리기 순서: 문 먼저, 플레이어 나중에!
-    door.draw(screen)
+    door.draw(screen, camera_offset)
     player.draw(screen)
-
+    
     # 텍스트 표시
     if near_door and not door.opened:
         text = font.render("E", True, BLACK)

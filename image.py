@@ -21,3 +21,4 @@ walk_right_img = pygame.image.load(walk_right_path).convert_alpha()
 walk_left_img = pygame.image.load(walk_left_path).convert_alpha()
 run_right_img = pygame.image.load(run_right_path).convert_alpha()
 run_left_img = pygame.image.load(run_left_path).convert_alpha()
+

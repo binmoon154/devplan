@@ -36,6 +36,21 @@ BLACK = (0, 0, 0)
 font_path = './zzz/NanumGothic.ttf'  # 파일 경로
 font = pygame.font.SysFont(None, 36)
 
+# 걷기 애니메이션 이미지 불러오기
+walk_right_imgs = [pygame.image.load(os.path.join(img_dir, f"walk{i}.png")).convert_alpha() for i in range(1, 5)]
+walk_left_imgs = [pygame.image.load(os.path.join(img_dir, f"back_walk{i}.png")).convert_alpha() for i in range(1, 5)]
+# 뛰기 이미지들
+run_right_imgs = [pygame.image.load(os.path.join(img_dir, f"run{i}.png")).convert_alpha() for i in range(1, 5)]
+run_left_imgs = [pygame.image.load(os.path.join(img_dir, f"back_run{i}.png")).convert_alpha() for i in range(1, 5)]
+
+
+# 애니메이션 인스턴스 만들기
+walk_right_anim = Animation(walk_right_imgs)
+walk_left_anim = Animation(walk_left_imgs)
+run_right_anim = Animation(run_right_imgs)
+run_left_anim = Animation(run_left_imgs)
+
+
 # --- Player 클래스 ---
 class Player:
     def __init__(self, x, y):
