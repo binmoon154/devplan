@@ -105,6 +105,7 @@ class Door:
                 self.opened = False
 
     def draw(self, screen, offset_x):
+        # 카메라 위치 보정
         draw_rect = self.closed_rect.move(-offset_x, 0)
         color = GRAY if self.opened else BROWN
         pygame.draw.rect(screen, color, draw_rect)
@@ -130,9 +131,11 @@ while running:
             running = False
 
     player.move()
+    screen.fill(WHITE)
     # 문 상태 업데이트
     for door in doors:
         door.update()
+        door.draw(screen, camera_offset)
 
     # 문과의 충돌 검사 및 열기
     keys = pygame.key.get_pressed()
@@ -144,39 +147,37 @@ while running:
         if near_door and keys[pygame.K_e] and not door.opened:
             door.open()
             camera_offset -= 50   # 화면을 이동시켜 플레이어가 이동한 것처럼 보임
+        
+        # 텍스트 표시
+        if near_door and not door.opened:
+            text = font.render("E", True, BLACK)
+            text_x = player.rect.x - 40
+            text_y = player.rect.y - 40
+
+            #텍스트 배경 사각형 크기 계산
+            text_width, text_height = text.get_size()
+            padding = 10
+            bg_rect = pygame.Rect(
+                text_x - padding // 2,
+                text_y - padding // 2,
+                text_width + padding,
+                text_height + padding
+            )
+
+            # 반투명 배경 Surface 만들기
+            bg_surface = pygame.Surface((bg_rect.width, bg_rect.height))
+            bg_surface.set_alpha(160)  # 0=완전투명, 255=불투명
+            bg_surface.fill((255, 255, 255))  # 흰색 반투명 배경
+
+            # 배경 먼저 그리기
+            screen.blit(bg_surface, (bg_rect.x + 40 , bg_rect.y + 30))
+
+            # 텍스트는 위에 그리기
+            screen.blit(text, (player.rect.x, player.rect.y - 10))  
 
 # 그리기 순서: 문 먼저, 플레이어 나중에!
-    door.draw(screen, camera_offset)
     player.draw(screen)
-    
-    # 텍스트 표시
-    if near_door and not door.opened:
-        text = font.render("E", True, BLACK)
-        text_x = player.rect.x - 40
-        text_y = player.rect.y - 40
-
-    #텍스트 배경 사각형 크기 계산
-        text_width, text_height = text.get_size()
-        padding = 10
-        bg_rect = pygame.Rect(
-            text_x - padding // 2,
-            text_y - padding // 2,
-            text_width + padding,
-            text_height + padding
-        )
-
-        # 반투명 배경 Surface 만들기
-        bg_surface = pygame.Surface((bg_rect.width, bg_rect.height))
-        bg_surface.set_alpha(160)  # 0=완전투명, 255=불투명
-        bg_surface.fill((255, 255, 255))  # 흰색 반투명 배경
-
-        # 배경 먼저 그리기
-        screen.blit(bg_surface, (bg_rect.x + 40 , bg_rect.y + 30))
-
-        # 텍스트는 위에 그리기
-        screen.blit(text, (player.rect.x, player.rect.y - 10))
-
-
+     
     pygame.display.update()
     clock.tick(60)
 
