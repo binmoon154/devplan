@@ -1,10 +1,28 @@
 import pygame
 import sys
+import os
 
 pygame.init()
-screen = pygame.display.set_mode((800, 600))
-pygame.display.set_caption("카메라 따라다니기")
+screen = pygame.display.set_mode((1440, 1000))
+pygame.display.set_caption("문 상호작용")
 clock = pygame.time.Clock()
+
+# 이미지 경로
+img_dir = r"game-image"
+idle_path = os.path.join(img_dir, "stop.png")
+walk_right_path = os.path.join(img_dir, "walk.png")
+walk_left_path = os.path.join(img_dir, "back_walk.png")
+run_right_path = os.path.join(img_dir, "run.png")
+run_left_path = os.path.join(img_dir, "back_run.png")
+stop_left_path = os.path.join(img_dir, "back_stop.png")
+
+# 이미지 로드
+idle_img = pygame.image.load(idle_path).convert_alpha()
+back_idle_img = pygame.image.load(stop_left_path).convert_alpha()
+walk_right_img = pygame.image.load(walk_right_path).convert_alpha()
+walk_left_img = pygame.image.load(walk_left_path).convert_alpha()
+run_right_img = pygame.image.load(run_right_path).convert_alpha()
+run_left_img = pygame.image.load(run_left_path).convert_alpha()
 
 WHITE = (255, 255, 255)
 BLUE = (0, 0, 255)
@@ -12,111 +30,281 @@ BROWN = (139, 69, 19)
 GRAY = (180, 180, 180)
 BLACK = (0, 0, 0)
 
+# --- 폰트 설정 ---
+# ✅ 한글 폰트 설정 - NanumGothic 사용
+font_path = './zzz/NanumGothic.ttf'  # 파일 경로
 font = pygame.font.SysFont(None, 36)
 
+camera_offset = 0
+
+# 전역 문 열기 쿨다운
+global_door_cooldown = 0
+GLOBAL_COOLDOWN_TIME = 1000  # 1초
+
+# --- Player 클래스 ---
 class Player:
     def __init__(self, x, y):
         self.rect = pygame.Rect(x, y, 50, 50)
         self.speed = 5
-        self.inventory = []
+        self.image = idle_img
+        self.direction = "right"
+        self.is_running = False
+        self.is_moving = False
 
-    def move(self):
+    def move(self, walls):
+        global camera_offset  # offset을 전역 변수로 접근
         keys = pygame.key.get_pressed()
+        self.is_moving = False
+        self.is_running = False
+        
+        # 이동 전 카메라 오프셋 저장
+        old_offset = camera_offset
+
         if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+            self.direction = "left"
+            self.is_moving = True
             if keys[pygame.K_LSHIFT]:
-                self.rect.x -= self.speed * 1.4
+                camera_offset -= self.speed * 1.4
+                self.is_running = True
             else:
-                self.rect.x -= self.speed
-        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+                camera_offset -= self.speed
+
+        elif keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+            self.direction = "right"
+            self.is_moving = True
             if keys[pygame.K_LSHIFT]:
-                self.rect.x += self.speed * 1.4
+                camera_offset += self.speed * 1.4
+                self.is_running = True
             else:
-                self.rect.x += self.speed
+                camera_offset += self.speed
 
-    def draw(self, screen, camera_x, camera_y):
-        pygame.draw.rect(screen, BLUE, (self.rect.x - camera_x, self.rect.y - camera_y, self.rect.width, self.rect.height))
+        # 벽과의 충돌 검사
+        for wall in walls:
+            wall_rect_with_offset = wall.rect.move(-camera_offset, 0)
+            if self.rect.colliderect(wall_rect_with_offset):
+                # 충돌 시 이전 위치로 되돌림
+                camera_offset = old_offset
+                self.is_moving = False
+                break
 
+        # 이미지 설정은 그대로
+        if self.is_moving:
+            if self.is_running:
+                self.image = run_right_img if self.direction == "right" else run_left_img
+            else:
+                self.image = walk_right_img if self.direction == "right" else walk_left_img
+        else:
+            self.image = idle_img if self.direction == "right" else back_idle_img
+
+    def draw(self, screen):
+        # 항상 중앙에 그리기
+        screen.blit(self.image, self.rect)
+
+
+# --- Timer 클래스 ---
+class Timer:
+    def __init__(self, x, y, initial_time=90, font_size=48):
+        self.x = x
+        self.y = y
+        self.current_time = initial_time
+        self.start_time = pygame.time.get_ticks()
+        self.font = pygame.font.SysFont(None, font_size)
+        self.is_running = True
+        
+    def update(self):
+        if self.is_running:
+            current_ticks = pygame.time.get_ticks()
+            elapsed_time = (current_ticks - self.start_time) // 1000
+            
+            if elapsed_time >= 1:  # 1초가 지났으면
+                self.current_time = max(0, self.current_time - elapsed_time)
+                self.start_time = current_ticks
+                
+                if self.current_time <= 0:
+                    self.is_running = False
+    
+    def add_time(self, seconds):
+        self.current_time += seconds
+        
+    def subtract_time(self, seconds):
+        self.current_time = max(0, self.current_time - seconds)
+        
+    def draw(self, screen):
+        minutes = self.current_time // 60
+        seconds = self.current_time % 60
+        time_text = f"{minutes:02d}:{seconds:02d}"
+        
+        # 시간이 적으면 빨간색, 많으면 흰색
+        color = (255, 0, 0) if self.current_time <= 30 else WHITE
+        
+        text_surface = self.font.render(time_text, True, color)
+        text_rect = text_surface.get_rect(center=(self.x, self.y))
+        
+        # 배경 사각형
+        bg_rect = text_rect.inflate(20, 10)
+        pygame.draw.rect(screen, BLACK, bg_rect)
+        pygame.draw.rect(screen, WHITE, bg_rect, 2)
+        
+        screen.blit(text_surface, text_rect)
+        
+    def is_time_up(self):
+        return self.current_time <= 0
+
+# --- Wall 클래스 ---
+class Wall:
+    def __init__(self, x, y, width, height, color=(BLACK)):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.color = color
+
+    def draw(self, screen, offset_x):
+        # 카메라 위치 보정
+        draw_rect = self.rect.move(-offset_x, 0)
+        pygame.draw.rect(screen, self.color, draw_rect)
+
+# --- Door 클래스 ---
 class Door:
-    def __init__(self, screen_x, screen_y):  # 화면 좌표로 고정
-        self.screen_rect = pygame.Rect(screen_x, screen_y, 50, 80)
+    def __init__(self, x, y, move_distance):
+        self.closed_rect = pygame.Rect(x, y, 150, 240)
         self.opened = False
+        self.open_time = 0
+        self.cooldown = 2000
+        self.move_distance = move_distance  # 문마다 이동 거리 다르게 설정
 
     def open(self):
         self.opened = True
+        self.open_time = pygame.time.get_ticks()
 
-    def draw(self, screen):
+    def update(self):
+        if self.opened:
+            current_time = pygame.time.get_ticks()
+            if current_time - self.open_time > self.cooldown:
+                self.opened = False
+
+    def draw(self, screen, offset_x):
+        # 카메라 위치 보정
+        draw_rect = self.closed_rect.move(-offset_x, 0)
         color = GRAY if self.opened else BROWN
-        pygame.draw.rect(screen, color, self.screen_rect)
+        pygame.draw.rect(screen, color, draw_rect)
 
-    def is_player_near(self, player_rect, camera_x, camera_y):
-        # 화면 좌표의 문 위치와 월드 좌표의 플레이어 충돌 확인
-        screen_player_rect = pygame.Rect(
-            player_rect.x - camera_x,
-            player_rect.y - camera_y,
-            player_rect.width,
-            player_rect.height
-        )
-        return self.screen_rect.colliderect(screen_player_rect)
 
-player = Player(100, 300)
-# 문 생성
-door = Door(600, 400)  # 화면 우측 고정
+# 객체 생성
+player = Player(1440 // 2 - 25, 300)
 
+# 여러 개의 문 만들기
+doors = [
+    Door(600, 260, -800),    # 첫 번째 문은 100 이동
+    Door(1000, 260, -1000),   # 두 번째 문은 200 이동
+    Door(1400, 260, 800),   # 세 번째 문은 300 이동
+    Door(2000, 260, 1000)
+]
+
+# 벽 만들기 (방의 경계)
+walls = [
+    Wall(0, 0, 50, 1000, (BLACK)),           # 왼쪽 벽
+    Wall(2500, 0, 50, 1000, (BLACK)),        # 오른쪽 벽
+    Wall(0, 0, 2550, 50, (BLACK)),           # 위쪽 벽
+    Wall(0, 950, 2550, 50, (BLACK)),         # 아래쪽 벽
+]
+
+# 타이머 생성 (화면 상단 중앙에 위치, 90초로 시작)
+timer = Timer(1440 // 2, 100, initial_time=90)
+
+
+# --- 게임 루프 ---
 running = True
+e_key_pressed = False  # E키 눌림 상태 추적
+
 while running:
     screen.fill(WHITE)
-
+    
+    # 이벤트 처리
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_e:
+                e_key_pressed = True
+        elif event.type == pygame.KEYUP:
+            if event.key == pygame.K_e:
+                e_key_pressed = False
 
-    player.move()
+    player.move(walls)
+    screen.fill(WHITE)
+    
+    # 타이머 업데이트
+    timer.update()
+    
+    # 벽 그리기
+    for wall in walls:
+        wall.draw(screen, camera_offset)
+    
+    # 문 상태 업데이트
+    for door in doors:
+        door.update()
+        door.draw(screen, camera_offset)
+    
+    # 타이머 그리기 (항상 고정 위치)
+    timer.draw(screen)
 
-    # 카메라 위치 계산 (플레이어 중심으로)
-    camera_x = player.rect.centerx - screen.get_width() // 2
-    camera_y = player.rect.centery - screen.get_height() // 2
+    # 전역 쿨다운 업데이트
+    current_time = pygame.time.get_ticks()
+    can_open_door = current_time > global_door_cooldown
 
-    # 충돌 검사
-    near_door = door.is_player_near(player.rect, camera_x, camera_y)
+    # 문과의 충돌 검사 및 열기 (E키가 방금 눌렸을 때만)
+    if e_key_pressed and can_open_door:
+        for door in doors:
+            door_rect_with_offset = door.closed_rect.move(-camera_offset, 0)
+            near_door = player.rect.colliderect(door_rect_with_offset)
 
-    # 문 열기
-    if near_door and keys[pygame.K_e] and not door.opened:
-        door.open()
-        player.rect.x -= 200  # 플레이어 왼쪽으로 이동
-
-    # 문-플레이어 순서 (겹침 방지)
-
-    door.draw(screen)
-    player.draw(screen, camera_x, camera_y)
-
-
-    # 텍스트 (화면상 좌표로 변환해서 그려야 함)
-    if near_door and not door.opened:
-        text = font.render("E", True, BLACK)
-        text_x = player.rect.x - camera_x - 20
-        text_y = player.rect.y - camera_y - 40
+            if near_door and not door.opened:
+                # 현재 문 열기
+                door.open()
+                camera_offset -= door.move_distance   # 각 문마다 다른 거리로 화면 이동
+                
+                # x - move_distance가 다른 문의 x와 같은 문들도 열기
+                opened_door_target_x = door.closed_rect.x - door.move_distance
+                for other_door in doors:
+                    if other_door != door and other_door.closed_rect.x == opened_door_target_x:
+                        other_door.open()
+                
+                global_door_cooldown = current_time + GLOBAL_COOLDOWN_TIME  # 전역 쿨다운 설정
+                e_key_pressed = False  # E키 처리 완료 후 False로 설정
+                break  # 한 번에 하나의 문만 열기
+    
+    # 텍스트 표시 (문 근처에 있을 때)
+    for door in doors:
+        door_rect_with_offset = door.closed_rect.move(-camera_offset, 0)
+        near_door = player.rect.colliderect(door_rect_with_offset)
         
-        # 텍스트 배경 사각형 크기 계산
-        text_width, text_height = text.get_size()
-        padding = 10
-        bg_rect = pygame.Rect(
-            text_x - padding // 2,
-            text_y - padding // 2,
-            text_width + padding,
-            text_height + padding
-        )
+        if near_door and not door.opened:
+            text = font.render("E", True, (255, 0, 0))
+            text_x = player.rect.x - 40
+            text_y = player.rect.y - 40
 
-        # 반투명 배경 Surface 만들기
-        bg_surface = pygame.Surface((bg_rect.width, bg_rect.height))
-        bg_surface.set_alpha(160)  # 0=완전투명, 255=불투명
-        bg_surface.fill((255, 255, 255))  # 흰색 반투명 배경
+            #텍스트 배경 사각형 크기 계산
+            text_width, text_height = text.get_size()
+            padding = 10
+            bg_rect = pygame.Rect(
+                text_x - padding // 2,
+                text_y - padding // 2,
+                text_width + padding,
+                text_height + padding
+            )
 
-        # 배경 먼저 그리기
-        screen.blit(bg_surface, (bg_rect.x + 20 , bg_rect.y))
+            # 반투명 배경 Surface 만들기
+            bg_surface = pygame.Surface((bg_rect.width, bg_rect.height))
+            bg_surface.set_alpha(160)  # 0=완전투명, 255=불투명
+            bg_surface.fill((255, 255, 255))  # 흰색 반투명 배경
 
-        # 텍스트는 위에 그리기
-        screen.blit(text, (text_x + 20, text_y))
+            # 배경 먼저 그리기
+            screen.blit(bg_surface, (bg_rect.x + 40 , bg_rect.y + 30))
 
+            # 텍스트는 위에 그리기
+            screen.blit(text, (player.rect.x, player.rect.y - 10))  
+
+# 그리기 순서: 문 먼저, 플레이어 나중에!
+    player.draw(screen)
+     
     pygame.display.update()
     clock.tick(60)
 
