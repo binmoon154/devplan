@@ -147,12 +147,13 @@ def run_settings_screen():
     
     screen_size_options = [
         (1280, 720),
-        (1440, 1080), 
+        (1440, 900), 
         (1920, 1080),
-        (2560, 1440)
+        #(2560, 1440)
     ]
     
-    screen_size_labels = ["1280x720", "1440x1080", "1920x1080", "2560x1440"]
+    screen_size_labels = ["1280x720", "1440x900", "1920x1080", #"2560x1440"
+    ]
     current_size = (current_width, current_height)
     current_index = 0 if current_size not in screen_size_options else screen_size_options.index(current_size)
     

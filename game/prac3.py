@@ -72,11 +72,16 @@ class Player:
         self.is_running = False
         self.is_moving = False
 
-    def move(self, walls):
+    def move(self, walls, can_move=True):
         global camera_offset  # offset을 전역 변수로 접근
         keys = pygame.key.get_pressed()
         self.is_moving = False
         self.is_running = False
+        
+        # 이동이 허용되지 않으면 애니메이션만 업데이트하고 리턴
+        if not can_move:
+            self.image = idle_img if self.direction == "right" else back_idle_img
+            return
         
         # 이동 전 카메라 오프셋 저장
         old_offset = camera_offset
@@ -124,16 +129,21 @@ class Player:
 
 # --- Timer 클래스 ---
 class Timer:
-    def __init__(self, x, y, initial_time=90, font_size=48):
+    def __init__(self, x, y, initial_time=10, font_size=48):
         self.x = x
         self.y = y
         self.current_time = initial_time
-        self.start_time = pygame.time.get_ticks()
+        self.start_time = None  # 시작 시간을 None으로 초기화
         self.font = pygame.font.SysFont(None, font_size)
-        self.is_running = True
+        self.is_running = False  # 처음에는 타이머가 꺼진 상태
         
+    def start_timer(self):
+        """타이머 시작"""
+        self.is_running = True
+        self.start_time = pygame.time.get_ticks()
+    
     def update(self):
-        if self.is_running:
+        if self.is_running and self.start_time is not None:
             current_ticks = pygame.time.get_ticks()
             elapsed_time = (current_ticks - self.start_time) // 1000
             
@@ -151,12 +161,16 @@ class Timer:
         self.current_time = max(0, self.current_time - seconds)
         
     def draw(self, screen):
+        # 타이머가 시작되지 않았으면 그리지 않음
+        if not self.is_running and self.start_time is None:
+            return
+            
         minutes = self.current_time // 60
         seconds = self.current_time % 60
         time_text = f"{minutes:02d}:{seconds:02d}"
         
         # 시간이 적으면 빨간색, 많으면 흰색
-        color = (255, 0, 0) if self.current_time <= 30 else WHITE
+        color = (255, 0, 0) if self.current_time <= 5 else WHITE
         
         text_surface = self.font.render(time_text, True, color)
         text_rect = text_surface.get_rect(center=(self.x, self.y))
@@ -396,14 +410,357 @@ class GameOverScreen:
 # 게임 오버 스크린 초기화
 game_over_screen = GameOverScreen()
 game_over_start_time = None
-game_state = "playing"  # "playing", "game_over", "returning"
+game_state = "intro_animation"  # "intro_animation", "playing", "door_opened_animation", "time_up_animation", "escape_success", "game_over", "returning"
+
+# 인트로 애니메이션 관련 변수들
+intro_animation_start_time = None
+intro_animation_duration = 5000  # 5초 동안 애니메이션
+intro_text_lines = [
+    "당신은 신비한 방에서 눈을 떴습니다...",
+    "문들이 곳곳에 보입니다."
+]
+intro_current_line = 0
+intro_line_start_time = None
+intro_line_duration = 1250  # 각 줄당 1.25초
+
+# === 게임 설정 (여기서 목표 문 개수를 변경할 수 있습니다) ===
+TARGET_DOORS_TO_ESCAPE = 4  # 탈출에 필요한 문의 개수 (언제든 변경 가능)
+
+# 첫 번째 문 열기 추적 변수
+first_door_opened = False
+doors_opened_count = 0  # 열린 문의 개수
+
+# --- 인트로 애니메이션 클래스 ---
+class IntroAnimation:
+    def __init__(self):
+        self.font_title = None
+        self.font_text = None
+        try:
+            font_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'NanumGothic.ttf')
+            self.font_title = pygame.font.Font(font_path, 48)
+            self.font_text = pygame.font.Font(font_path, 32)
+        except:
+            self.font_title = pygame.font.Font(None, 48)
+            self.font_text = pygame.font.Font(None, 32)
+    
+    def draw(self, screen, current_line_index, lines):
+        # 검은색 배경
+        screen.fill((0, 0, 0))
+        
+        # 현재 줄 표시
+        if current_line_index < len(lines):
+            text_surface = self.font_text.render(lines[current_line_index], True, (255, 255, 255))
+            text_rect = text_surface.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+            screen.blit(text_surface, text_rect)
+        
+        # 하단 안내 메시지
+        if current_line_index >= len(lines) - 1:  # 마지막 줄에서만 표시
+            skip_text = self.font_text.render("스페이스바 또는 ESC로 게임 시작", True, (150, 150, 150))
+            skip_rect = skip_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 100))
+            screen.blit(skip_text, skip_rect)
+
+# --- 혼란 상태 애니메이션 클래스 ---
+class ConfusionAnimation:
+    def __init__(self):
+        self.font = None
+        try:
+            font_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'NanumGothic.ttf')
+            self.font = pygame.font.Font(font_path, 24)
+        except:
+            self.font = pygame.font.Font(None, 24)
+        
+        self.thoughts = [
+            "문들이 보이느데...",
+            "대체 여기는 어디지...?",
+            "왜 여기 있는지 모르겠어..."
+        ]
+        
+        self.last_thought_time = 0
+        self.thought_duration = 3000  # 3초마다 생각 바뀜
+        self.current_thought = 0
+        self.show_thought = False
+        self.thought_show_duration = 2000  # 2초 동안 표시
+        self.thought_start_time = 0
+        
+    def update(self):
+        current_time = pygame.time.get_ticks()
+        
+        # 새로운 생각을 보여줄 시간인지 확인
+        if current_time - self.last_thought_time > self.thought_duration:
+            self.show_thought = True
+            self.thought_start_time = current_time
+            self.last_thought_time = current_time
+            self.current_thought = (self.current_thought + 1) % len(self.thoughts)
+        
+        # 생각 표시 시간이 끝났는지 확인
+        if self.show_thought and current_time - self.thought_start_time > self.thought_show_duration:
+            self.show_thought = False
+    
+    def draw(self, screen, player_rect):
+        if not self.show_thought:
+            return
+            
+        # 말풍선 위치 (플레이어 위쪽)
+        bubble_x = player_rect.centerx
+        bubble_y = player_rect.top - 40
+        
+        # 현재 생각 텍스트
+        text = self.thoughts[self.current_thought]
+        text_surface = self.font.render(text, True, (50, 50, 50))
+        text_rect = text_surface.get_rect()
+        
+        # 말풍선 크기 계산
+        padding = 15
+        bubble_width = text_rect.width + padding * 2
+        bubble_height = text_rect.height + padding * 2
+        
+        # 말풍선 배경
+        bubble_rect = pygame.Rect(
+            bubble_x - bubble_width // 2, 
+            bubble_y - bubble_height // 2, 
+            bubble_width, 
+            bubble_height
+        )
+        
+        # 말풍선 그리기 (둥근 사각형)
+        pygame.draw.rect(screen, (255, 255, 240), bubble_rect, border_radius=15)
+        pygame.draw.rect(screen, (100, 100, 100), bubble_rect, 3, border_radius=15)
+        
+        # 말풍선 꼬리 (삼각형)
+        tail_points = [
+            (bubble_x - 10, bubble_rect.bottom),
+            (bubble_x + 10, bubble_rect.bottom),
+            (bubble_x, bubble_rect.bottom + 15)
+        ]
+        pygame.draw.polygon(screen, (255, 255, 240), tail_points)
+        pygame.draw.polygon(screen, (100, 100, 100), tail_points, 3)
+        
+        # 텍스트 그리기
+        text_x = bubble_rect.centerx - text_rect.width // 2
+        text_y = bubble_rect.centery - text_rect.height // 2
+        screen.blit(text_surface, (text_x, text_y))
+
+# --- 문 열기 후 애니메이션 클래스 ---
+class DoorOpenedAnimation:
+    def __init__(self):
+        self.font_text = None
+        try:
+            font_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'NanumGothic.ttf')
+            self.font_text = pygame.font.Font(font_path, 36)
+        except:
+            self.font_text = pygame.font.Font(None, 36)
+        
+        self.animation_lines = [
+            "문이 열렸다!"
+        ]
+        
+        self.animation_start_time = None
+        self.animation_duration = 2000  # 6초 동안 애니메이션
+        self.current_line = 0
+        self.line_start_time = None
+        self.line_duration = 1500  # 각 줄당 1.5초
+        
+    def start_animation(self):
+        current_time = pygame.time.get_ticks()
+        self.animation_start_time = current_time
+        self.line_start_time = current_time
+        self.current_line = 0
+        
+    def update(self):
+        if self.animation_start_time is None:
+            return False
+            
+        current_time = pygame.time.get_ticks()
+        
+        # 줄별 타이밍 관리
+        if self.line_start_time is not None and current_time - self.line_start_time >= self.line_duration:
+            if self.current_line < len(self.animation_lines) - 1:
+                self.current_line += 1
+                self.line_start_time = current_time
+        
+        # 애니메이션 완료 체크
+        if current_time - self.animation_start_time >= self.animation_duration:
+            return True  # 애니메이션 완료
+        return False  # 애니메이션 진행 중
+    
+    def draw(self, screen):
+        if self.animation_start_time is None:
+            return
+            
+        # 검은색 배경
+        screen.fill((0, 0, 0))
+        
+        # 현재 줄 표시
+        if self.current_line < len(self.animation_lines):
+            text_surface = self.font_text.render(self.animation_lines[self.current_line], True, (255, 255, 255))
+            text_rect = text_surface.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+            screen.blit(text_surface, text_rect)
+        
+        # 스킵 안내 표시
+        skip_font = pygame.font.Font(None, 24)
+        skip_text = skip_font.render("스페이스바 또는 ESC로 스킵", True, (150, 150, 150))
+        skip_rect = skip_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 100))
+        screen.blit(skip_text, skip_rect)
+
+# --- 시간 종료 애니메이션 클래스 ---
+class TimeUpAnimation:
+    def __init__(self):
+        self.font_text = None
+        try:
+            font_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'NanumGothic.ttf')
+            self.font_text = pygame.font.Font(font_path, 36)
+        except:
+            self.font_text = pygame.font.Font(None, 36)
+        
+        self.animation_lines = [
+            "시간이 다 지나갔다...",
+            "탈출에 실패했다.",
+            "다시 시도해보자!"
+        ]
+        
+        self.animation_start_time = None
+        self.animation_duration = 4500  # 4.5초 동안 애니메이션
+        self.current_line = 0
+        self.line_start_time = None
+        self.line_duration = 1500  # 각 줄당 1.5초
+        self.can_skip = False  # 스킵 가능 여부
+        
+    def start_animation(self):
+        current_time = pygame.time.get_ticks()
+        self.animation_start_time = current_time
+        self.line_start_time = current_time
+        self.current_line = 0
+        self.can_skip = True
+        
+    def update(self):
+        if self.animation_start_time is None:
+            return False
+            
+        current_time = pygame.time.get_ticks()
+        
+        # 줄별 타이밍 관리
+        if self.line_start_time is not None and current_time - self.line_start_time >= self.line_duration:
+            if self.current_line < len(self.animation_lines) - 1:
+                self.current_line += 1
+                self.line_start_time = current_time
+        
+        # 애니메이션 완료 체크
+        if current_time - self.animation_start_time >= self.animation_duration:
+            return True  # 애니메이션 완료
+        return False  # 애니메이션 진행 중
+    
+    def skip(self):
+        """애니메이션 스킵"""
+        if self.can_skip:
+            return True
+        return False
+    
+    def draw(self, screen):
+        if self.animation_start_time is None:
+            return
+            
+        # 검은색 배경
+        screen.fill((0, 0, 0))
+        
+        # 현재 줄 표시
+        if self.current_line < len(self.animation_lines):
+            text_surface = self.font_text.render(self.animation_lines[self.current_line], True, (255, 255, 255))
+            text_rect = text_surface.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+            screen.blit(text_surface, text_rect)
+        
+        # 스킵 안내 표시 (마지막 줄에서만)
+        if self.current_line >= len(self.animation_lines) - 1:
+            skip_font = pygame.font.Font(None, 24)
+            skip_text = skip_font.render("스페이스바 또는 ESC로 스킵", True, (150, 150, 150))
+            skip_rect = skip_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 100))
+            screen.blit(skip_text, skip_rect)
+
+# --- 탈출 성공 애니메이션 클래스 ---
+class EscapeSuccessAnimation:
+    def __init__(self):
+        self.font_text = None
+        try:
+            font_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'NanumGothic.ttf')
+            self.font_text = pygame.font.Font(font_path, 36)
+        except:
+            self.font_text = pygame.font.Font(None, 36)
+        
+        self.animation_lines = [
+            "축하합니다!",
+            "탈출에 성공했습니다!",
+            "훌륭한 플레이였습니다!"
+        ]
+        
+        self.animation_start_time = None
+        self.animation_duration = 4500  # 4.5초 동안 애니메이션
+        self.current_line = 0
+        self.line_start_time = None
+        self.line_duration = 1500  # 각 줄당 1.5초
+        self.can_skip = False  # 스킵 가능 여부
+        
+    def start_animation(self):
+        current_time = pygame.time.get_ticks()
+        self.animation_start_time = current_time
+        self.line_start_time = current_time
+        self.current_line = 0
+        self.can_skip = True
+        
+    def update(self):
+        if self.animation_start_time is None:
+            return False
+            
+        current_time = pygame.time.get_ticks()
+        
+        # 줄별 타이밍 관리
+        if self.line_start_time is not None and current_time - self.line_start_time >= self.line_duration:
+            if self.current_line < len(self.animation_lines) - 1:
+                self.current_line += 1
+                self.line_start_time = current_time
+        
+        # 애니메이션 완료 체크
+        if current_time - self.animation_start_time >= self.animation_duration:
+            return True  # 애니메이션 완료
+        return False  # 애니메이션 진행 중
+    
+    def skip(self):
+        """애니메이션 스킵"""
+        if self.can_skip:
+            return True
+        return False
+    
+    def draw(self, screen):
+        if self.animation_start_time is None:
+            return
+            
+        # 밝은 배경 (성공 느낌)
+        screen.fill((20, 50, 20))  # 어두운 초록색
+        
+        # 현재 줄 표시
+        if self.current_line < len(self.animation_lines):
+            text_surface = self.font_text.render(self.animation_lines[self.current_line], True, (255, 255, 255))
+            text_rect = text_surface.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+            screen.blit(text_surface, text_rect)
+        
+        # 스킵 안내 표시 (마지막 줄에서만)
+        if self.current_line >= len(self.animation_lines) - 1:
+            skip_font = pygame.font.Font(None, 24)
+            skip_text = skip_font.render("스페이스바 또는 ESC로 스킵", True, (150, 255, 150))
+            skip_rect = skip_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 100))
+            screen.blit(skip_text, skip_rect)
+
+# 인트로 애니메이션 객체 생성
+intro_animation = IntroAnimation()
+confusion_animation = ConfusionAnimation()
+door_opened_animation = DoorOpenedAnimation()
+time_up_animation = TimeUpAnimation()
+escape_success_animation = EscapeSuccessAnimation()
 
 # --- 게임 루프 ---
 running = True
 e_key_pressed = False  # E키 눌림 상태 추적
 
 while running:
-    screen.fill(WHITE)
+    current_time = pygame.time.get_ticks()
     
     # 이벤트 처리
     for event in pygame.event.get():
@@ -416,26 +773,102 @@ while running:
                     text_reader.stop_reading()
                 else:
                     e_key_pressed = True
+            elif (event.key == pygame.K_SPACE or event.key == pygame.K_ESCAPE) and game_state == "intro_animation":
+                # 스페이스바나 ESC로 애니메이션 건너뛰기
+                if intro_current_line >= len(intro_text_lines) - 1:
+                    game_state = "playing"
+            elif (event.key == pygame.K_SPACE or event.key == pygame.K_ESCAPE) and game_state == "time_up_animation":
+                # 스페이스바나 ESC로 시간 종료 애니메이션 스킵
+                if time_up_animation.skip():
+                    game_state = "game_over"
+                    game_over_start_time = pygame.time.get_ticks()
+            elif (event.key == pygame.K_SPACE or event.key == pygame.K_ESCAPE) and game_state == "escape_success":
+                # 스페이스바나 ESC로 탈출 성공 애니메이션 스킵
+                if escape_success_animation.skip():
+                    pygame.quit()
+                    import subprocess
+                    import sys
+                    subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "main_menu.py")])
+                    sys.exit()
+            elif (event.key == pygame.K_SPACE or event.key == pygame.K_ESCAPE) and game_state == "door_opened_animation":
+                # 스페이스바나 ESC로 문 열기 애니메이션 스킵
+                game_state = "playing"
+                timer.start_timer()
         elif event.type == pygame.KEYUP:
             if event.key == pygame.K_e and not text_reader.is_reading and game_state == "playing":
                 e_key_pressed = False
 
     # 게임 상태별 처리
-    if game_state == "playing":
-        player.move(walls)
-        screen.fill(WHITE)
+    if game_state == "intro_animation":
+        # 인트로 애니메이션 초기화
+        if intro_animation_start_time is None:
+            intro_animation_start_time = current_time
+            intro_line_start_time = current_time
         
-        # 타이머 업데이트
-        timer.update()
+        # 줄별 타이밍 관리
+        if intro_line_start_time is not None and current_time - intro_line_start_time >= intro_line_duration:
+            if intro_current_line < len(intro_text_lines) - 1:
+                intro_current_line += 1
+                intro_line_start_time = current_time
+            elif current_time - intro_animation_start_time >= intro_animation_duration:
+                # 애니메이션 완료 후 게임 시작
+                game_state = "playing"
         
-        # 타이머 만료 체크
-        if timer.is_time_up():
+        # 인트로 애니메이션 그리기
+        intro_animation.draw(screen, intro_current_line, intro_text_lines)
+    
+    elif game_state == "door_opened_animation":
+        # 문 열기 후 애니메이션 상태
+        animation_finished = door_opened_animation.update()
+        door_opened_animation.draw(screen)
+        
+        if animation_finished:
+            # 애니메이션 완료 후 게임 플레이 재개 및 타이머 시작
+            game_state = "playing"
+            timer.start_timer()
+    
+    elif game_state == "time_up_animation":
+        # 시간 종료 애니메이션 상태
+        animation_finished = time_up_animation.update()
+        time_up_animation.draw(screen)
+        
+        if animation_finished:
+            # 애니메이션 완료 후 게임 오버로 전환
             game_state = "game_over"
             game_over_start_time = pygame.time.get_ticks()
     
+    elif game_state == "escape_success":
+        # 탈출 성공 애니메이션 상태
+        animation_finished = escape_success_animation.update()
+        escape_success_animation.draw(screen)
+        
+        if animation_finished:
+            # 애니메이션 완료 후 메인 메뉴로 돌아가기
+            pygame.quit()
+            import subprocess
+            import sys
+            subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "main_menu.py")])
+            sys.exit()
+    
+    elif game_state == "playing":
+        # 플레이어 입력만 게임 상태에서 허용
+        player.move(walls, can_move=True)
+        screen.fill(WHITE)
+        
+        # 첫 문이 열리지 않았을 때만 혼란 애니메이션 업데이트
+        if not first_door_opened:
+            confusion_animation.update()
+        
+        # 타이머 업데이트 (첫 문이 열리고 애니메이션이 끝난 후에만)
+        if first_door_opened and timer.is_running:
+            timer.update()
+            # 타이머 만료 체크 - 시간 종료 애니메이션으로 전환
+            if timer.is_time_up():
+                game_state = "time_up_animation"
+                time_up_animation.start_animation()
+    
     elif game_state == "game_over":
         # 게임 오버 상태에서 3초 후 메인 메뉴로 돌아가기
-        current_time = pygame.time.get_ticks()
         if current_time - game_over_start_time > 3000:  # 3초 후
             pygame.quit()
             import subprocess
@@ -456,6 +889,19 @@ while running:
         
         # 타이머 그리기 (항상 고정 위치)
         timer.draw(screen)
+        
+        # 문 열기 진행 상황 표시
+        progress_font = pygame.font.Font(None, 32)
+        progress_text = f"열린 문: {doors_opened_count}/{TARGET_DOORS_TO_ESCAPE}"
+        progress_surface = progress_font.render(progress_text, True, (255, 255, 255))
+        progress_rect = progress_surface.get_rect(topleft=(20, 20))
+        
+        # 진행 상황 배경
+        bg_rect = progress_rect.inflate(20, 10)
+        pygame.draw.rect(screen, (0, 0, 0), bg_rect)
+        pygame.draw.rect(screen, (255, 255, 255), bg_rect, 2)
+        
+        screen.blit(progress_surface, progress_rect)
 
         # 전역 쿨다운 업데이트
         current_time = pygame.time.get_ticks()
@@ -485,7 +931,20 @@ while running:
                     if near_door and not door.opened:
                         # 현재 문 열기
                         door.open()
+                        doors_opened_count += 1  # 열린 문 카운터 증가
                         camera_offset -= door.move_distance   # 각 문마다 다른 거리로 화면 이동
+                        
+                        # 첫 번째 문이 열렸을 때 애니메이션 시작
+                        if not first_door_opened:
+                            first_door_opened = True
+                            game_state = "door_opened_animation"  # 애니메이션 상태로 전환
+                            door_opened_animation.start_animation()  # 애니메이션 시작
+                        
+                        # 목표 문 개수에 도달했는지 확인
+                        if doors_opened_count >= TARGET_DOORS_TO_ESCAPE:
+                            game_state = "escape_success"
+                            escape_success_animation.start_animation()
+                            break
                         
                         # x - move_distance가 다른 문의 x와 같은 문들도 열기
                         opened_door_target_x = door.closed_rect.x - door.move_distance
@@ -569,6 +1028,10 @@ while running:
 
         # 그리기 순서: 문 먼저, 플레이어 나중에!
         player.draw(screen)
+        
+        # 첫 문이 열리지 않았을 때만 혼란 애니메이션 그리기
+        if not first_door_opened:
+            confusion_animation.draw(screen, player.rect)
         
         # 텍스트 읽기 UI (가장 마지막에 그리기)
         text_reader.draw(screen)
